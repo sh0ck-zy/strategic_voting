@@ -1,42 +1,82 @@
 import math
-from tva.voting_schemes import plurality_voting
+import copy
 from itertools import combinations
 
-def compute_risk(preferences, outcome):
+
+def compute_risk(preferences, outcome, voting_function):
+    """
+    Compute the risk of strategic voting with a single voter.
+
+    The risk is defined as the minimum number of voters needed to
+    change the election outcome, which is always 1 for successful
+    single-voter manipulation or math.inf if impossible.
+
+    Args:
+        preferences: List of voter preference lists
+        outcome: Current voting outcome
+        voting_function: Function to use for calculating election results
+
+    Returns:
+        risk: 1 if manipulation is possible, math.inf otherwise
+    """
     if len(outcome) != 1:
         return math.inf
-    else:
-        outcome = outcome[0]
 
-    original_winner = outcome
+    original_winner = outcome[0]
     num_voters = len(preferences)
 
-    # Prioritize voters who currently rank the winner highest (they are the most impactful)
-    voter_priority = sorted(
-        range(num_voters), 
-        key=lambda v: preferences[v].index(original_winner)
-    )
+    # Check each voter for possible manipulation
+    for voter_idx in range(num_voters):
+        # Get all possible alternatives except the original winner
+        all_alternatives = set()
+        for pref in preferences:
+            all_alternatives.update(pref)
 
-    for k in range(1, num_voters + 1):
-        print(f"Checking {k}-voter combinations...")
+        target_alternatives = [alt for alt in all_alternatives if alt != original_winner]
 
-        for voters_to_change in combinations(voter_priority, k):
-            backup_prefs = [preferences[v][:] for v in voters_to_change]
+        for target in target_alternatives:
+            # Try manipulation to benefit this target
+            modified_preferences = copy.deepcopy(preferences)
+            voter_pref = modified_preferences[voter_idx]
 
-            for voter in voters_to_change:
-                preferences[voter].remove(original_winner)
+            # Try different manipulation strategies based on voting scheme
+            if voting_function.__name__ == "plurality_voting":
+                # Put target first
+                if target in voter_pref:
+                    voter_pref.remove(target)
+                voter_pref.insert(0, target)
 
-            new_outcome = plurality_voting(preferences)
+            elif voting_function.__name__ == "voting_for_two":
+                # Ensure target is in top two positions
+                if target in voter_pref:
+                    voter_pref.remove(target)
+                voter_pref.insert(0, target)
 
-            for idx, voter in enumerate(voters_to_change):
-                preferences[voter] = backup_prefs[idx]
+            elif voting_function.__name__ == "anti_plurality_voting":
+                # Ensure original winner is last
+                if original_winner in voter_pref:
+                    voter_pref.remove(original_winner)
+                    voter_pref.append(original_winner)
 
-            if len(new_outcome) != 1:
-                continue
-            else:
-                new_outcome = new_outcome[0]
+            elif voting_function.__name__ == "borda_voting":
+                # Put target first and original winner last
+                if target in voter_pref:
+                    voter_pref.remove(target)
+                if original_winner in voter_pref:
+                    voter_pref.remove(original_winner)
 
-            if new_outcome != original_winner:
-                return k 
+                voter_pref.insert(0, target)
+                voter_pref.append(original_winner)
 
-    return math.inf 
+            # Test if manipulation was successful
+            new_winners = voting_function(modified_preferences)
+
+            if len(new_winners) == 1 and new_winners[0] != original_winner:
+                return 1  # Successful manipulation by a single voter
+            elif len(new_winners) > 1 and original_winner not in new_winners:
+                # Use lexicographical ordering for tie-breaking
+                new_winner = sorted(new_winners)[0]
+                if new_winner != original_winner:
+                    return 1
+
+    return math.inf  # No successful manipulation found
